@@ -1,4 +1,6 @@
-# Duck Agents
+# Agent Sepolia
+
+Peer id: `0x2e2390c874a089bEbFdF47BCaA39067Ef5dFF967`
 
 P2P agents that can communicate and process messages using LLM capabilities.
 
