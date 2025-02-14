@@ -4,6 +4,7 @@ import { P2PClient } from "../sdk/src/p2p";
 import { Message } from "../sdk/src/p2p/types";
 import { processMessage } from "./agent";
 import { Logger } from "./utils/logger";
+import blacklist from "./address.json";
 
 // Load environment variables
 dotenv();
@@ -22,15 +23,49 @@ async function handleMessage(message: Message) {
       content: message.content,
     });
 
-    // Process message with LLM
-    const response = await processMessage(message.content);
+    // Validate that the message content is a valid Ethereum address
+    const ethAddressRegex = /^0x[a-fA-F0-9]{40}$/;
+    if (!ethAddressRegex.test(message.content)) {
+      const errorResponse = {
+        status: "error",
+        message: "Invalid Ethereum address format",
+        address: message.content,
+      };
+      await client.sendMessage(
+        message.fromAgentId,
+        JSON.stringify(errorResponse)
+      );
+      return;
+    }
 
-    // Send response back to sender
-    await client.sendMessage(message.fromAgentId, response);
+    // Check if the address is in the blacklist (case-insensitive)
+    const normalizedAddress = message.content.toLowerCase();
+    const isBlacklisted = blacklist.some(
+      (addr: string) => addr.toLowerCase() === normalizedAddress
+    );
+
+    // Create structured response
+    const response = {
+      status: "success",
+      address: message.content,
+      isBlacklisted: isBlacklisted,
+      timestamp: new Date().toISOString(),
+    };
+
+    await client.sendMessage(message.fromAgentId, JSON.stringify(response));
   } catch (error) {
+    const errorResponse = {
+      status: "error",
+      message: error instanceof Error ? error.message : String(error),
+      timestamp: new Date().toISOString(),
+    };
     Logger.error("agent", "Failed to handle message", {
       error: error instanceof Error ? error.message : String(error),
     });
+    await client.sendMessage(
+      message.fromAgentId,
+      JSON.stringify(errorResponse)
+    );
   }
 }
 
@@ -93,6 +128,47 @@ app.post("/api/chat", (req: Request, res: Response) => {
       });
     }
   })();
+});
+
+// HTTP endpoint to check if an address is blacklisted
+app.get("/api/check/:address", async (req: Request, res: Response) => {
+  try {
+    const { address } = req.params;
+
+    // Validate that the address is a valid Ethereum address
+    const ethAddressRegex = /^0x[a-fA-F0-9]{40}$/;
+    if (!ethAddressRegex.test(address)) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid Ethereum address format",
+        address: address,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // Check if the address is in the blacklist (case-insensitive)
+    const normalizedAddress = address.toLowerCase();
+    const isBlacklisted = blacklist.some(
+      (addr: string) => addr.toLowerCase() === normalizedAddress
+    );
+
+    // Return structured response
+    return res.json({
+      status: "success",
+      address: address,
+      isBlacklisted: isBlacklisted,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    Logger.error("http", "Failed to check address", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return res.status(500).json({
+      status: "error",
+      message: "Failed to check address",
+      timestamp: new Date().toISOString(),
+    });
+  }
 });
 
 async function main() {
